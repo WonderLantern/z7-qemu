@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /* Minimal research machine. This is NOT a Nikon EXPEED peripheral model. */
 #include "qemu/osdep.h"
+#include "nikon-z7-shoulder.h"
 #include "qemu/cutils.h"
 #include "qemu/error-report.h"
 #include "qapi/error.h"
@@ -78,6 +79,7 @@ typedef struct Z7LabState {
     unsigned exmcu_tx_count, exmcu_rx_head, exmcu_rx_count, exmcu_rx_offset;
     uint32_t exmcu_gpio_pending, exmcu_gpio_mask, exmcu_gpio_polarity, exmcu_gpio_mode;
     bool exmcu_tx_ready, exmcu_tx_ack;
+    Z7ShoulderObserver shoulder;
     uint32_t graphics_regs[0x1600 / 4];
     uint32_t graphics_cmd_regs[2][512];
     uint8_t graphics_tables[2][0x10000];
@@ -831,6 +833,18 @@ static void z7_panel_complete(void *opaque)
             fprintf(stderr, "%04x%s", p->fifo[i], i + 1 == p->count ? "\n" : ",");
         }
     }
+    /* Observe transmitted words before the existing sink consumes them. */
+    for (unsigned i = 0; i < p->count; i++) {
+        if (z7_shoulder_word(&p->owner->shoulder, p->channel,
+                ((p->owner->serial_config[p->channel][0x10 / 4] >> 8) & 31) + 1,
+                p->fifo[i], qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL))) {
+            fprintf(stderr, "Z7_SHOULDER_FRAME source=guest-main-firmware spi=0 data=");
+            for (unsigned b = 0; b < 256; b++) {
+                fprintf(stderr, "%02x", p->owner->shoulder.frame[b]);
+            }
+            fprintf(stderr, "\n");
+        }
+    }
     for (unsigned i = 0; i < p->count; i++) {
         unsigned index = (p->rx_head + p->rx_count + i) % ARRAY_SIZE(p->rx_fifo);
         p->rx_fifo[index] = p->owner->exmcu_test_device && p->channel <= 1 ?
@@ -879,6 +893,7 @@ static bool z7_panel_access(Z7LabState *s, hwaddr addr, unsigned size,
             s->serial_config[p->channel][off / 4] = *value;
             p->active = *value & 1;
             if (!p->active) {
+                if (ch == 0) { z7_shoulder_reset(&s->shoulder); }
                 timer_del(p->timer);
                 p->count = p->rx_count = p->rx_head = p->pending = 0;
                 if (s->exmcu_test_device && ch == 0) {
@@ -910,6 +925,7 @@ static bool z7_panel_access(Z7LabState *s, hwaddr addr, unsigned size,
         if (*value) {
             timer_mod(p->timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + 100000);
         } else {
+            if (ch == 0) { z7_shoulder_reset(&s->shoulder); }
             timer_del(p->timer);
             p->pending = 0;
         }
@@ -945,6 +961,9 @@ static bool z7_serial_config_access(Z7LabState *s, hwaddr addr, unsigned size,
     }
     if (write) {
         if (*value & ~(uint64_t)mask) { return false; }
+        if (ch == 0 && s->serial_config[ch][off / 4] != *value) {
+            z7_shoulder_reset(&s->shoulder);
+        }
         s->serial_config[ch][off / 4] = *value;
     } else { *value = s->serial_config[ch][off / 4]; }
     z7_mmio_trace(addr, size, write, *value);
@@ -3104,6 +3123,7 @@ static void z7_common_init(MachineState *machine, bool boot_profile, bool gic_v1
     s->recovery_profile = recovery_profile;
     s->graphics_profile = !strcmp(MACHINE_GET_CLASS(machine)->name, "nikon-z7-display");
     if (s->graphics_profile) {
+        s->shoulder.enabled = g_strcmp0(getenv("Z7_SHOULDER_OBSERVE"), "1") == 0;
         s->exmcu_test_device = g_strcmp0(getenv("Z7_EXMCU_TEST_DEVICE"), "1") == 0;
         s->exmcu_no_lens = s->exmcu_test_device && g_strcmp0(getenv("Z7_EXMCU_NO_LENS"), "1") == 0;
         s->exmcu_capture_sync_test = s->exmcu_test_device &&

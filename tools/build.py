@@ -13,7 +13,7 @@ import urllib.request
 ROOT = Path(__file__).resolve().parents[1]
 VERSION = '10.2.4'
 SHA256 = '821b545b92f165e57dddccac5077d76d4d436a226595b8813ad59306bbfd0746'
-SOURCES = ['qemu/nikon-z7-lab.c','qemu/nikon-z7-gpu.h','qemu/nikon-z7-isp.h','qemu/nikon-z7-isp-pixels.h','qemu/prepare_source.py']
+SOURCES = ['qemu/nikon-z7-lab.c','qemu/nikon-z7-shoulder.h','qemu/nikon-z7-gpu.h','qemu/nikon-z7-isp.h','qemu/nikon-z7-isp-pixels.h','qemu/prepare_source.py']
 
 def digest(path):
     h = hashlib.sha256()

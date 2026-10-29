@@ -14,3 +14,5 @@ cc -std=c11 -O1 -g -fsanitize=address,undefined -Itests/include tests/test_gpu.c
 cc -std=c11 -O1 -g -fsanitize=address,undefined tests/test_isp.c $(pkg-config --cflags --libs glib-2.0) -lm -o "$TEST_BUILD/isp"
 ASAN_OPTIONS=detect_leaks=1 "$TEST_BUILD/gpu"
 ASAN_OPTIONS=detect_leaks=1 "$TEST_BUILD/isp"
+cc -std=c11 -O1 -g -fsanitize=address,undefined tests/test_shoulder_observer.c -o "$TEST_BUILD/shoulder"
+ASAN_OPTIONS=detect_leaks=1 "$TEST_BUILD/shoulder"

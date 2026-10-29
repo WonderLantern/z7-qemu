@@ -13,6 +13,8 @@ main{max-width:916px;margin:12px auto;padding:0 12px}
 .screen{position:relative;aspect-ratio:3/2;background:#000;overflow:hidden}
 .screen img{display:block;width:100%;height:100%;object-fit:contain}
 .placeholder{position:absolute;inset:0;display:grid;place-content:center;color:#aaa}
+.shoulder{margin-top:10px;color:#aaa}
+.shoulder img{display:block;width:128px;height:96px;image-rendering:pixelated}
 .status{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:8px;color:#aaa;min-height:18px}
 .error{margin-top:8px;color:#f99;white-space:pre-wrap;overflow-wrap:anywhere}
 .row{display:flex;gap:6px;margin-bottom:6px}
@@ -40,6 +42,10 @@ button:disabled{opacity:.35;cursor:default}
   <div class="status" id="raw-input" hidden></div>
   <div class="error" id="capture-status" hidden>CMOS 初始化未完成，尚无传感器输入。</div>
   <div class="error" id="error" hidden></div>
+  <div class="shoulder" aria-label="肩屏">
+    <img id="shoulder-frame" alt="原厂 MCU 肩屏绘图" hidden>
+    <div id="shoulder-message" aria-live="polite">Shoulder display disabled</div>
+  </div>
 </section>
 <aside aria-label="相机控制">
   <div class="row"><button id="shooting" title="重启并切换调试界面">切换界面</button></div>
@@ -55,7 +61,7 @@ button:disabled{opacity:.35;cursor:default}
 </div>
 </main>
 <script>
-const token='__TOKEN__';let state={},frame=-1,fetching=false;const el=id=>document.getElementById(id);
+const token='__TOKEN__';let state={},frame=-1,shoulderFrame=-1,fetching=false;const el=id=>document.getElementById(id);
 async function action(action,key){try{const r=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Z7-Token':token},body:JSON.stringify({action,key})});const j=await r.json();if(!r.ok)throw Error(j.error);el('toast').textContent=key?'按键已发送…':'操作已发送…';}catch(e){el('toast').textContent=e.message;}}
 document.querySelectorAll('[data-key]').forEach(b=>b.addEventListener('click',()=>action('key',b.dataset.key)));
 el('pause').onclick=()=>action(state.phase==='paused'?'resume':'pause');el('restart').onclick=()=>action('restart');el('stop').onclick=()=>action('stop');
@@ -72,6 +78,9 @@ el('capture-status').hidden=!state.capture;el('shooting').disabled=state.phase==
 el('capture-status').textContent=state.device_evidence?'无镜头 · 实验性传感器和图像处理':(state.no_lens_simulation?'无镜头模拟 · ':'')+(state.capture?.control_test?'控制链实验：使用模拟握手和测试脉冲；RAW 0 帧，尚未接入 CMOS。':'CMOS 初始化未完成，尚无传感器输入。');
 if(state.phase==='booting'){el('frame').hidden=true;el('placeholder').hidden=false;frame=-1;}
 if(state.frame&&frame!==state.frame){const response=await fetch('/api/frame?v='+state.frame);if(response.ok){const url=URL.createObjectURL(await response.blob());const img=el('frame'),old=img.src;img.onload=()=>{if(old.startsWith('blob:'))URL.revokeObjectURL(old);};img.src=url;img.hidden=false;el('placeholder').hidden=true;frame=state.frame;}}
+const shoulder=state.shoulder||{};el('shoulder-message').textContent=shoulder.message||'Shoulder display disabled';
+if(!shoulder.available){el('shoulder-frame').hidden=true;shoulderFrame=-1;}
+else if(shoulderFrame!==shoulder.frame){try{const response=await fetch('/api/shoulder/frame?v='+shoulder.frame);if(response.ok){const url=URL.createObjectURL(await response.blob());const img=el('shoulder-frame'),old=img.src;img.onload=()=>{if(old.startsWith('blob:'))URL.revokeObjectURL(old);};img.src=url;img.hidden=false;shoulderFrame=shoulder.frame;}}catch(e){el('shoulder-message').textContent='Shoulder frame unavailable';}}
 if(state.last_key&&!state.busy)el('toast').textContent='按键：'+state.last_key;
 }catch(e){el('status').textContent='连接中断';document.querySelectorAll('button').forEach(b=>b.disabled=true);}finally{fetching=false;setTimeout(poll,document.hidden?1000:state.phase==='running'?120:500);}}
 poll();

@@ -8,7 +8,7 @@ assert (root / 'VERSION').read_text().strip() == '10.2.4'
 source, target = project / 'nikon-z7-lab.c', root / 'hw/arm/nikon-z7-lab.c'
 if not target.exists() or source.read_bytes() != target.read_bytes():
     shutil.copyfile(source, target)
-for name in ['nikon-z7-gpu.h', 'nikon-z7-isp.h', 'nikon-z7-isp-pixels.h']:
+for name in ['nikon-z7-shoulder.h', 'nikon-z7-gpu.h', 'nikon-z7-isp.h', 'nikon-z7-isp-pixels.h']:
     source, target = project / name, root / 'hw/arm' / name
     if not target.exists() or source.read_bytes() != target.read_bytes():
         shutil.copyfile(source, target)

@@ -58,6 +58,13 @@ Do not equate accepted key actions with successful shooting. No physical CMOS
 protocol, AF/PDAF, MVD, recording, hardware add-on loading or flash acceptance
 is certified by this test. The board has no complete VMState snapshot support.
 
+## Optional shoulder replay
+
+See [shoulder-display.md](shoulder-display.md) for the firmware-free observer,
+protocol and service tests, and the opt-in private native-function reference
+checks. Public CI needs no companion firmware or Unicorn. Neither test scope
+certifies full MCU RTOS execution or camera hardware equivalence.
+
 ## Native Windows host checks
 
 The native Windows port was exercised in an independent modified lab with
@@ -94,3 +101,30 @@ Python suite to 23 tests. They cover acknowledged quit, EOF/reset after quit,
 missing/reset/error capability and status replies, an unexpected running status,
 a nonzero process exit and a quit timeout. Earlier replies remain mandatory, and
 a missing quit acknowledgement cannot hide a crash or a hung process.
+
+## PR #5 review regression checks (2026-10-30)
+
+After integrating main's native Windows support, the Linux ARM64 container run
+passed 37 public Python tests, with the optional private integration test skipped.
+The 12 synthetic TCP QMP/process regressions are included in that count.
+`sh tests/run.sh` also passed 270 GPU checks, 398 ISP checks and the passive
+shoulder observer contracts with ASan/UBSan and no diagnostics.
+
+The CRLF regression now checks both completed records, in order, using distinct
+payloads. A separate test completes only the missing LF and expects exactly one
+snapshot. Both cases check repeated polls and rejection counts; malformed hex,
+extra CRs, trailing characters and invalid frame fields remain rejected.
+The production parser and original ex1610 function harness are unchanged.
+
+With locally supplied firmware, all 38 Python tests passed. Seven historical
+payload cases (four distinct payloads) matched the existing reference harness's
+1536-byte framebuffers byte for byte, including repeated updates. These private
+inputs and outputs are excluded from the public tree. Native Windows execution
+was not available for this review; its regression run remains to be performed.
+
+A fresh build from the verified QEMU 10.2.4 archive passed, followed by real
+localhost TCP QMP realization/status/quit checks with shoulder observation both
+disabled and enabled. The main menu also booted using a Python installation
+without Unicorn, both without the companion option and with valid companion
+firmware supplied; in the latter case only the optional shoulder service
+reported the missing dependency.

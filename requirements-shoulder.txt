@@ -1,0 +1,2 @@
+# Optional original companion-MCU function replay
+unicorn==2.1.4

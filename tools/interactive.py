@@ -26,6 +26,7 @@ import zlib
 import probe
 from probe import call_fixture, Remote
 from capture_diagnostics import action_completed, capture_health, capture_state
+from shoulder_display import ShoulderService
 
 ROOT = Path(__file__).resolve().parent
 PROJECT = ROOT.parent
@@ -102,7 +103,7 @@ class Camera:
                  exmcu_test_device=False, capture_control_test=False, raw_source=None,
                  exmcu_no_lens=False, orientation_fixture=None, keep_awake=False,
                  tg_periodic_test=False, raw_ingress_test=None, tg_paired_test=False, isp_boundary_test=False,
-                 photo_liveview=False, one_insn_per_tb=False):
+                 photo_liveview=False, one_insn_per_tb=False, companion_firmware=None):
         # Fail before launching QEMU if any selected input is malformed.
         self.raw_source = RawSequence(raw_source) if raw_source else None
         self.port = port
@@ -141,6 +142,9 @@ class Camera:
                       'no_lens_simulation': self.exmcu_no_lens,
                       'orientation_fixture': self.orientation_fixture,
                       'keep_awake': self.keep_awake, 'idle_timeout_override': None}
+        self.shoulder = ShoulderService(companion_firmware)
+        self.state['shoulder'] = dict(self.shoulder.status)
+        self.shoulder_png = None
         self.png = None
         self.previous_pixels = None
         self.proc = self.remote = self.monitor = self.console = None
@@ -242,6 +246,10 @@ class Camera:
         if self.raw_source:
             self.raw_source = RawSequence(self.raw_source.path)
             self.update(raw_input=self.raw_source.status())
+        self.shoulder.reset()
+        with self.lock:
+            self.shoulder_png = None
+            self.state['shoulder'] = dict(self.shoulder.status)
         self.boot_count += 1
         self.device_log_position = 0
         self.device_log_tail = ''
@@ -278,6 +286,9 @@ class Camera:
         self.live_log = self.frame_spool/f'qemu-{self.boot_count}.log'
         self.console = self.live_log.open('w')
         env = dict(os.environ, Z7_MMIO_QUIET='1')
+        env.pop('Z7_SHOULDER_OBSERVE', None)
+        if self.shoulder.renderer is not None:
+            env['Z7_SHOULDER_OBSERVE'] = '1'
         if os.name == 'nt' and build.get('native_runtime_path'):
             env['PATH'] = build['native_runtime_path'] + os.pathsep + env.get('PATH', '')
         env.pop('Z7_IMAGE_CONFIG_RECORD', None)
@@ -567,6 +578,10 @@ class Camera:
         if self.running and not status['running']:
             raise RuntimeError('虚拟机已停止：'+status['status'])
         self.refresh_device_evidence()
+        self.shoulder.poll(self.live_log)
+        with self.lock:
+            self.shoulder_png = self.shoulder.png
+            self.state['shoulder'] = dict(self.shoulder.status)
         if not self.running and self.state.get('capture') is not None:
             # Publish a fresh paused observation instead of retaining boot state.
             health = dict(self.state['capture'])
@@ -600,6 +615,10 @@ class Camera:
                 self.state['message'] = self.running_message()
 
     def close_guest(self):
+        self.shoulder.close()
+        with self.lock:
+            self.shoulder_png = None
+            self.state['shoulder'] = dict(self.shoulder.status)
         for handle in (self.remote, self.monitor):
             if handle:
                 try:
@@ -690,6 +709,8 @@ def main():
     global FIRMWARE, BUILD_MANIFEST
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--firmware', type=Path, required=True, help='Your locally obtained extracted Z7 C 3.80 main payload')
+    p.add_argument('--companion-firmware', type=Path,
+                   help='Optional local Z7 C3.80 ex1610 image for shoulder function replay')
     p.add_argument('--build-manifest', type=Path, default=BUILD_MANIFEST)
     p.add_argument('--port', type=int, default=8787)
     p.add_argument('--one-insn-per-tb', action=argparse.BooleanOptionalAction, default=False,
@@ -732,7 +753,7 @@ def main():
                     isp_boundary_test=a.isp_boundary_test or a.photo_liveview,
                     orientation_fixture=0 if a.photo_liveview and a.orientation_fixture is None else a.orientation_fixture,
                     keep_awake=a.keep_awake or a.photo_liveview, photo_liveview=a.photo_liveview,
-                    one_insn_per_tb=a.one_insn_per_tb)
+                    one_insn_per_tb=a.one_insn_per_tb, companion_firmware=a.companion_firmware)
     camera.isp_disable_cache = a.isp_disable_cache
     class Handler(http.server.BaseHTTPRequestHandler):
         def log_message(self, *_):
@@ -757,6 +778,15 @@ def main():
                 self.send(200, html.encode(), 'text/html; charset=utf-8')
             elif path == '/api/status':
                 self.send(200, json.dumps(camera.snapshot(), ensure_ascii=False).encode())
+            elif path == '/api/shoulder':
+                with camera.lock:
+                    status = dict(camera.state['shoulder'])
+                self.send(200, json.dumps(status).encode())
+            elif path == '/api/shoulder/frame':
+                with camera.lock:
+                    png = camera.shoulder_png
+                self.send(200 if png else 503, png or b'Shoulder frame unavailable',
+                          'image/png' if png else 'text/plain')
             elif path == '/api/frame':
                 with camera.lock:
                     png = camera.png
